@@ -27,3 +27,36 @@ describe('GET /products', () => {
     expect(response.body[0].name).toBe('Guide Docker');
   });
 });
+
+describe('POST /products', () => {
+  it('should create a product with valid data', async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [
+        {
+          id: 2,
+          name: 'Guide Kubernetes',
+          description: 'Support avancé',
+          price_cents: 2900,
+          stock: 5
+        }
+      ]
+    });
+
+    const response = await request(app)
+      .post('/products')
+      .send({ name: 'Guide Kubernetes', description: 'Support avancé', price_cents: 2900, stock: 5 });
+
+    expect(response.status).toBe(201);
+    expect(response.body.name).toBe('Guide Kubernetes');
+    expect(response.body.price_cents).toBe(2900);
+  });
+
+  it('should return 400 when required fields are missing', async () => {
+    const response = await request(app)
+      .post('/products')
+      .send({ name: 'Produit incomplet' });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBeDefined();
+  });
+});
