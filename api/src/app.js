@@ -1,6 +1,8 @@
 const express = require('express');
 const cors = require('cors');
+const { randomUUID } = require('crypto');
 const pool = require('./db');
+const logger = require('./logger');
 const { version } = require('../package.json');
 
 const app = express();
@@ -9,7 +11,23 @@ const startTime = Date.now();
 app.use(cors());
 app.use(express.json());
 
-// const x = 1;
+// Attach a unique ID to every request and log it when the response is sent
+app.use((req, res, next) => {
+  req.requestId = randomUUID();
+  const start = Date.now();
+
+  res.on('finish', () => {
+    logger.info('request', {
+      method: req.method,
+      route: req.path,
+      status: res.statusCode,
+      duration_ms: Date.now() - start,
+      requestId: req.requestId,
+    });
+  });
+
+  next();
+});
 
 app.get('/', (req, res) => {
   res.json({
@@ -30,12 +48,14 @@ app.get('/health', async (req, res) => {
   try {
     await pool.query('SELECT 1');
 
+    logger.info('dependency', { check: 'database', status: 'ok' });
     res.json({
       status: 'ok',
       ...base,
       dependencies: { database: 'connected' },
     });
   } catch (error) {
+    logger.error('dependency', { check: 'database', status: 'error', message: error.message });
     res.status(503).json({
       status: 'error',
       ...base,
@@ -47,10 +67,8 @@ app.get('/health', async (req, res) => {
 app.get('/ready', async (req, res) => {
   const checks = {};
 
-  // Check 1: required environment variables
   checks.env_vars = process.env.DATABASE_URL ? 'ok' : 'error';
 
-  // Check 2: database
   try {
     await pool.query('SELECT 1');
     checks.database = 'ok';
@@ -58,11 +76,15 @@ app.get('/ready', async (req, res) => {
     checks.database = 'error';
   }
 
-  // Check 3: cache — not used in this project
   checks.cache = 'not_configured';
-
-  // Check 4: external payment service — not used in this project
   checks.payment_service = 'not_configured';
+
+  if (checks.env_vars === 'error') {
+    logger.error('dependency', { check: 'env_vars', status: 'error', missing: 'DATABASE_URL' });
+  }
+  if (checks.database === 'error') {
+    logger.error('dependency', { check: 'database', status: 'error' });
+  }
 
   const criticalFailed = checks.env_vars === 'error' || checks.database === 'error';
 
@@ -76,28 +98,12 @@ app.get('/ready', async (req, res) => {
   });
 });
 
-// app.get('/about', async (req, res) => {
-//   try {
-//     const result = await pool.query(
-//       'SELECT project, module, objective FROM about ORDER BY id ASC'
-//     );
-
-//     res.json(result.rows);
-//   } catch (error) {
-//     res.status(500).json({
-//       error: 'Impossible de récupérer les produits',
-//       message: error.message
-//     });
-//   }
-// });
-
 app.get('/about', (req, res) => {
   try {
-    // On remplace la requête SQL par l'objet JSON demandé
     const projectInfo = {
-      "project": "TrainShop Starter",
-      "module": "DevOps",
-      "objective": "Créer une CI GitHub Actions"
+      'project': 'TrainShop Starter',
+      'module': 'DevOps',
+      'objective': 'Créer une CI GitHub Actions'
     };
 
     res.json(projectInfo);
@@ -117,6 +123,12 @@ app.get('/products', async (req, res) => {
 
     res.json(result.rows);
   } catch (error) {
+    logger.error('error', {
+      method: req.method,
+      route: req.path,
+      message: error.message,
+      requestId: req.requestId,
+    });
     res.status(500).json({
       error: 'Impossible de récupérer les produits',
       message: error.message
@@ -139,6 +151,12 @@ app.get('/products/:id', async (req, res) => {
 
     res.json(result.rows[0]);
   } catch (error) {
+    logger.error('error', {
+      method: req.method,
+      route: req.path,
+      message: error.message,
+      requestId: req.requestId,
+    });
     res.status(500).json({
       error: 'Impossible de récupérer le produit',
       message: error.message
@@ -163,8 +181,21 @@ app.post('/products', async (req, res) => {
       [name, description, price_cents, stock || 0]
     );
 
+    logger.info('business', {
+      action: 'product_created',
+      productId: result.rows[0].id,
+      name: result.rows[0].name,
+      requestId: req.requestId,
+    });
+
     res.status(201).json(result.rows[0]);
   } catch (error) {
+    logger.error('error', {
+      method: req.method,
+      route: req.path,
+      message: error.message,
+      requestId: req.requestId,
+    });
     res.status(500).json({
       error: 'Impossible de créer le produit',
       message: error.message
@@ -172,32 +203,19 @@ app.post('/products', async (req, res) => {
   }
 });
 
-app.post('/orders', async (_req, _res) => {
-  // try {
-  //   const { name, description, price_cents, stock } = req.body;
+app.post('/orders', async (_req, _res) => {});
 
-  //   if (!name || !description || !price_cents) {
-  //     return res.status(400).json({
-  //       error: 'name, description et price_cents sont obligatoires'
-  //     });
-  //   }
+app.post('/checkout', async (_req, _res) => {});
 
-  //   const result = await pool.query(
-  //     `INSERT INTO products (name, description, price_cents, stock)
-  //      VALUES ($1, $2, $3, $4)
-  //      RETURNING id, name, description, price_cents, stock`,
-  //     [name, description, price_cents, stock || 0]
-  //   );
-
-  //   res.status(201).json(result.rows[0]);
-  // } catch (error) {
-  //   res.status(500).json({
-  //     error: 'Impossible de créer le produit',
-  //     message: error.message
-  //   });
-  // }
+// Catch unhandled Express errors and log them before responding
+app.use((err, req, res, _next) => {
+  logger.error('error', {
+    method: req.method,
+    route: req.path,
+    message: err.message,
+    requestId: req.requestId,
+  });
+  res.status(500).json({ error: 'Internal server error' });
 });
-
-app.post('/checkout', async (_req, _res) => {})
 
 module.exports = app;
