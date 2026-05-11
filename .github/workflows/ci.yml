@@ -7,8 +7,23 @@ on:
     branches: ["main"]
 
 jobs:
-  test:
+  ci:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ${{ secrets.POSTGRES_USER }} -d ${{ secrets.POSTGRES_DB }}"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: Checkout
@@ -30,3 +45,39 @@ jobs:
       - name: Run tests
         run: npm test
         working-directory: api
+
+      - name: Build Docker image
+        run: docker build -t trainshop-api ./api
+
+      - name: Start container
+        run: |
+          docker run -d \
+            --name trainshop-api-test \
+            --network=host \
+            -e API_PORT=3000 \
+            -e DATABASE_URL=postgres://${{ secrets.POSTGRES_USER }}:${{ secrets.POSTGRES_PASSWORD }}@localhost:5432/${{ secrets.POSTGRES_DB }} \
+            trainshop-api
+
+      - name: Wait for API to be ready
+        run: |
+          for i in $(seq 1 15); do
+            if curl -sf http://localhost:3000/health > /dev/null; then
+              echo "API is ready"
+              exit 0
+            fi
+            echo "Attempt $i/15 — waiting..."
+            sleep 2
+          done
+          echo "API did not respond in time"
+          docker logs trainshop-api-test
+          exit 1
+
+      - name: Test /health route
+        run: |
+          response=$(curl -sf http://localhost:3000/health)
+          echo "$response"
+          echo "$response" | grep '"status":"ok"'
+
+      - name: Clean up container
+        if: always()
+        run: docker rm -f trainshop-api-test
