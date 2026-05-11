@@ -5,10 +5,16 @@ on:
     branches: ["main"]
   pull_request:
     branches: ["main"]
+  # The workflow runs automatically on two events: a direct push to main, or when a pull request targets main.
+  # Every other branch is ignored.
+
 
 jobs:
   ci:
     runs-on: ubuntu-latest
+  # Defines one job called ci. GitHub spins up a fresh Ubuntu virtual machine for it. Everything below runs
+  # inside that VM.
+
 
     services:
       postgres:
@@ -25,29 +31,42 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
+  # GitHub starts a PostgreSQL Docker container before any step runs. The credentials come from your repository
+  # secrets. The healthcheck polls pg_isready every 10s — steps only start once it passes, so the DB is
+  # guaranteed ready. Port 5432 is mapped to the VM's localhost.
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        # Clones repository into the VM. Without this, none of files exist yet.
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+        # Installs Node 20 on the VM. Uses a pre-built GitHub action so you don't have to do it manually.
 
       - name: Install dependencies
         run: npm install
         working-directory: api
+      # Installs everything in api/package.json (Express, Jest, ESLint, etc.). working-directory means all commands
+      # in this step run from the api/ folder.
 
       - name: Lint
         run: npm run lint
         working-directory: api
+      #  Runs ESLint on src/ and tests/. If any rule is violated, ESLint exits with a non-zero code and the entire CI
+      # job fails here — before even running tests.
 
       - name: Run tests
         run: npm test
         working-directory: api
+      #  Runs Jest with --runInBand (sequential, as configured in package.json). The DB is mocked inside the tests so
+      #  no PostgreSQL connection is needed here.
 
       - name: Build Docker image
         run: docker build -t trainshop-api ./api
+      #  Builds the image from api/Dockerfile and tags it trainshop-api. If the Dockerfile is broken, CI fails here.
 
       - name: Start container
         run: |
@@ -71,6 +90,9 @@ jobs:
           echo "API did not respond in time"
           docker logs trainshop-api-test
           exit 1
+  #           Polls /health up to 15 times (30 seconds total) waiting for the API to start. If it never responds, it
+  # prints the container logs to help debug, then fails the job.
+
 
       - name: Test /health route
         run: |
@@ -81,3 +103,6 @@ jobs:
       - name: Clean up container
         if: always()
         run: docker rm -f trainshop-api-test
+#  if: always() means this step runs even if a previous step failed. It removes the container so the VM doesn't
+#    accumulate orphan containers. Without this, a failed job would leave the container running until GitHub
+#   kills the VM.
