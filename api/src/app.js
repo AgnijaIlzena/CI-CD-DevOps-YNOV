@@ -7,6 +7,8 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+const x = 1;
+
 app.get('/', (req, res) => {
   res.json({
     message: 'Bienvenue sur TrainShop Starter',
