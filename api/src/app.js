@@ -33,6 +33,39 @@ app.get('/health', async (req, res) => {
   }
 });
 
+// app.get('/about', async (req, res) => {
+//   try {
+//     const result = await pool.query(
+//       'SELECT project, module, objective FROM about ORDER BY id ASC'
+//     );
+
+//     res.json(result.rows);
+//   } catch (error) {
+//     res.status(500).json({
+//       error: 'Impossible de récupérer les produits',
+//       message: error.message
+//     });
+//   }
+// });
+
+app.get('/about', (req, res) => {
+  try {
+    // On remplace la requête SQL par l'objet JSON demandé
+    const projectInfo = {
+      "project": "TrainShop Starter",
+      "module": "DevOps",
+      "objective": "Créer une CI GitHub Actions"
+    };
+
+    res.json(projectInfo);
+  } catch (error) {
+    res.status(500).json({
+      error: 'Erreur lors de la récupération des informations du projet',
+      message: error.message
+    });
+  }
+});
+
 app.get('/products', async (req, res) => {
   try {
     const result = await pool.query(
