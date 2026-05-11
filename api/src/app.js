@@ -172,7 +172,7 @@ app.post('/products', async (req, res) => {
   }
 });
 
-app.post('/orders', async (req, res) => {
+app.post('/orders', async (_req, _res) => {
   // try {
   //   const { name, description, price_cents, stock } = req.body;
 
@@ -198,6 +198,6 @@ app.post('/orders', async (req, res) => {
   // }
 });
 
-app.post('/checkout', async (req, res) => {})
+app.post('/checkout', async (_req, _res) => {})
 
 module.exports = app;
