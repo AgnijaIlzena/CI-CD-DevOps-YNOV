@@ -1,8 +1,10 @@
 const express = require('express');
 const cors = require('cors');
 const pool = require('./db');
+const { version } = require('../package.json');
 
 const app = express();
+const startTime = Date.now();
 
 app.use(cors());
 app.use(express.json());
@@ -17,22 +19,61 @@ app.get('/', (req, res) => {
 });
 
 app.get('/health', async (req, res) => {
+  const base = {
+    service: 'trainshop-api',
+    version: process.env.APP_VERSION || version,
+    environment: process.env.NODE_ENV || 'development',
+    timestamp: new Date().toISOString(),
+    uptime: Math.floor((Date.now() - startTime) / 1000),
+  };
+
   try {
     await pool.query('SELECT 1');
 
     res.json({
       status: 'ok',
-      service: 'trainshop-api',
-      database: 'connected'
+      ...base,
+      dependencies: { database: 'connected' },
     });
   } catch (error) {
     res.status(503).json({
       status: 'error',
-      service: 'trainshop-api',
-      database: 'unavailable',
-      message: error.message
+      ...base,
+      dependencies: { database: 'unavailable' },
     });
   }
+});
+
+app.get('/ready', async (req, res) => {
+  const checks = {};
+
+  // Check 1: required environment variables
+  checks.env_vars = process.env.DATABASE_URL ? 'ok' : 'error';
+
+  // Check 2: database
+  try {
+    await pool.query('SELECT 1');
+    checks.database = 'ok';
+  } catch {
+    checks.database = 'error';
+  }
+
+  // Check 3: cache — not used in this project
+  checks.cache = 'not_configured';
+
+  // Check 4: external payment service — not used in this project
+  checks.payment_service = 'not_configured';
+
+  const criticalFailed = checks.env_vars === 'error' || checks.database === 'error';
+
+  const status = criticalFailed ? 503 : 200;
+  res.status(status).json({
+    status: criticalFailed ? 'not_ready' : 'ready',
+    service: 'trainshop-api',
+    version: process.env.APP_VERSION || version,
+    timestamp: new Date().toISOString(),
+    checks,
+  });
 });
 
 // app.get('/about', async (req, res) => {
